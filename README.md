@@ -9,7 +9,7 @@ A tool computing the total memory usage per program.
 ### Usage
 
 ```
-go run github.com/xpetit/macos/blame@latest
+go run github.com/xpetit/macos/blame@latest | head
 ```
 
 > ```
