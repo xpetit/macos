@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	. "github.com/xpetit/x"
 	"golang.org/x/exp/maps"
@@ -15,31 +13,15 @@ import (
 )
 
 type process struct {
-	command string
-	CPUTime time.Duration
-	Uptime  time.Duration
+	Command string
 	RSS     int
 	PID     int
 	PPID    int
 }
 
-func parseDuration(s, minuteSep string) (d time.Duration) {
-	if len(s) > 5 {
-		hours, s2, ok := strings.Cut(s, ":")
-		Assert("found hours", ok)
-		d += time.Duration(Check2(strconv.Atoi(hours))) * time.Hour
-		s = s2
-	}
-	mins, s, ok := strings.Cut(s, minuteSep)
-	Assert("found minutes", ok)
-	d += time.Duration(Check2(strconv.Atoi(mins))) * time.Minute
-	d += time.Duration(Check2(strconv.Atoi(s))) * time.Second
-	return
-}
-
 func main() {
-	// parse command output
-	s := string(Check2(exec.Command("ps", "-ASo", "time,etime,rss,pid,ppid,comm").Output()))
+	// Parse command output
+	s := string(Check2(exec.Command("ps", "-ASo", "rss,pid,ppid,comm").Output()))
 	lines := strings.Split(s, "\n")
 	lines = lines[1 : len(lines)-1] // remove header and trailing line
 	processByPID := map[int]*process{}
@@ -54,73 +36,85 @@ func main() {
 			return line[start:i]
 		}
 		p := process{
-			CPUTime: parseDuration(nextField(), "." /*minuteSep*/),
-			Uptime:  parseDuration(nextField(), ":" /*minuteSep*/),
 			RSS:     Check2(strconv.Atoi(nextField())),
 			PID:     Check2(strconv.Atoi(nextField())),
 			PPID:    Check2(strconv.Atoi(nextField())),
-			command: strings.TrimSpace(line[i:]),
+			Command: strings.TrimSpace(line[i:]),
 		}
 		if p.PID > 1 {
 			processByPID[p.PID] = &p
 		}
 	}
 
-	// for each process, add its memory usage (RSS) to the ancestor (the parent process immediately below PID 1)
-	memByPID := map[int]int{}
+	// Add to the top level process (the parent process immediately below PID 1) the resources of each of its children
 	for _, p := range processByPID {
-		rss := p.RSS
-		for ; p.PPID != 1; p = processByPID[p.PPID] {
+		if p.PPID == 1 {
+			continue
 		}
-		memByPID[p.PID] += rss
+		parent := p
+		for ; parent.PPID != 1; parent = processByPID[parent.PPID] {
+		}
+		parent.RSS += p.RSS
 	}
 
-	// merge processes that are under the same name/category
-	memByCmd := map[string]int{}
-	var total int
-	for pid, mem := range memByPID {
-		if processByPID[pid].PPID == 1 {
-			mem *= 1024
-			total += mem
-			cmd := processByPID[pid].command
-			switch cmd {
-			case "/System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XprotectService.xpc/Contents/MacOS/XprotectService":
-				cmd = "XProtect"
+	// Merge processes that are under the same name/category
+	processByName := map[string]*process{}
+	for _, p := range processByPID {
+		if p.PPID != 1 {
+			continue
+		}
+		name := p.Command
+		switch name {
+		case "/System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XprotectService.xpc/Contents/MacOS/XprotectService":
+			name = "XProtect"
+		default:
+			switch {
+			case
+				strings.HasPrefix(name, "/Applications/JavaSnipt"),
+				strings.HasPrefix(name, "/Applications/StopTheMadness"),
+				strings.HasPrefix(name, "/Applications/Wipr"),
+				strings.HasPrefix(name, "/Library/Apple/System/Library/CoreServices/SafariSupport.bundle"),
+				strings.HasPrefix(name, "/System/Library/Frameworks/AppKit.framework"),
+				strings.HasPrefix(name, "/System/Library/Frameworks/SafariServices.framework"),
+				strings.HasPrefix(name, "/System/Library/Frameworks/WebKit.framework"),
+				strings.HasPrefix(name, "/System/Library/PrivateFrameworks/SafariSafeBrowsing.framework"),
+				strings.HasPrefix(name, "/System/Library/PrivateFrameworks/SafariShared.framework"),
+				strings.HasSuffix(name, "com.giorgiocalderolla.Wipr-Mac.Wipr-Refresher"):
+				name = "/Applications/Safari"
 			default:
-				switch {
-				case
-					strings.HasPrefix(cmd, "/Applications/JavaSnipt"),
-					strings.HasPrefix(cmd, "/Applications/StopTheMadness"),
-					strings.HasPrefix(cmd, "/Applications/Wipr"),
-					strings.HasPrefix(cmd, "/Library/Apple/System/Library/CoreServices/SafariSupport.bundle"),
-					strings.HasPrefix(cmd, "/System/Library/Frameworks/AppKit.framework"),
-					strings.HasPrefix(cmd, "/System/Library/Frameworks/SafariServices.framework"),
-					strings.HasPrefix(cmd, "/System/Library/Frameworks/WebKit.framework"),
-					strings.HasPrefix(cmd, "/System/Library/PrivateFrameworks/SafariSafeBrowsing.framework"),
-					strings.HasPrefix(cmd, "/System/Library/PrivateFrameworks/SafariShared.framework"),
-					strings.HasSuffix(cmd, "com.giorgiocalderolla.Wipr-Mac.Wipr-Refresher"):
-					cmd = "/Applications/Safari"
-				default:
-					if i := strings.Index(cmd, ".app/Contents/"); i != -1 {
-						cmd = cmd[:i]
-					}
+				if i := strings.Index(name, ".app/Contents/"); i != -1 {
+					name = name[:i]
 				}
 			}
-			cmd = filepath.Base(cmd)
-			memByCmd[cmd] += mem
+		}
+		name = filepath.Base(name)
+		if p2, ok := processByName[name]; !ok {
+			// insert a copy
+			p := *p
+			p.Command = name
+			processByName[name] = &p
+		} else {
+			// merge
+			p2.RSS += p.RSS
 		}
 	}
 
-	// print results
-	cmds := maps.Keys(memByCmd)
-	slices.SortFunc(cmds, func(a, b string) bool {
-		return memByCmd[a] > memByCmd[b]
+	var totalMem int
+	for _, p := range processByName {
+		p.RSS *= 1024
+		totalMem += p.RSS
+	}
+
+	// Display results
+	names := maps.Keys(processByName)
+	slices.SortFunc(names, func(a, b string) bool {
+		return processByName[a].RSS > processByName[b].RSS
 	})
-	tot := fmt.Sprintf("%.f", float64(total)/1e6)
-	fmt.Println(tot, "MB         Total memory used")
+	tot := fmt.Sprintf("%.f", float64(totalMem)/1e6)
+	fmt.Println(tot, "MB Total memory used")
 	fmt.Println()
-	for _, cmd := range cmds {
-		percent := strconv.Itoa(int(math.Round(100 * float64(memByCmd[cmd]) / float64(total))))
-		fmt.Printf("%*.f MB  %3s %%  %s \n", len(tot), float64(memByCmd[cmd])/1e6, percent, cmd)
+	for _, cmd := range names {
+		percent := fmt.Sprintf("%.f", 100*float64(processByName[cmd].RSS)/float64(totalMem))
+		fmt.Printf("%*.f MB %3s %% %s \n", len(tot), float64(processByName[cmd].RSS)/1e6, percent, cmd)
 	}
 }
