@@ -1,27 +1,40 @@
-package main
+package macos
 
 import (
-	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/xpetit/x"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 type process struct {
 	Command string
+	CPU     float64
 	RSS     int
 	PID     int
 	PPID    int
 }
 
-func main() {
+func parseDuration(s, minuteSep string) (d time.Duration) {
+	if len(s) > 5 {
+		hours, s2, ok := strings.Cut(s, ":")
+		Assert("found hours", ok)
+		d += time.Duration(Check2(strconv.Atoi(hours))) * time.Hour
+		s = s2
+	}
+	mins, s, ok := strings.Cut(s, minuteSep)
+	Assert("found minutes", ok)
+	d += time.Duration(Check2(strconv.Atoi(mins))) * time.Minute
+	d += time.Duration(Check2(strconv.Atoi(s))) * time.Second
+	return
+}
+
+func GetProcesses() map[string]*process {
 	// Parse command output
-	s := string(Check2(exec.Command("ps", "-ASo", "rss,pid,ppid,comm").Output()))
+	s := string(Check2(exec.Command("ps", "-ASo", "time,etime,rss,pid,ppid,comm").Output()))
 	lines := strings.Split(s, "\n")
 	lines = lines[1 : len(lines)-1] // remove header and trailing line
 	processByPID := map[int]*process{}
@@ -35,11 +48,18 @@ func main() {
 			}
 			return line[start:i]
 		}
+		var (
+			CPUTime = parseDuration(nextField(), "." /*minuteSep*/)
+			Uptime  = parseDuration(nextField(), ":" /*minuteSep*/)
+		)
 		p := process{
 			RSS:     Check2(strconv.Atoi(nextField())),
 			PID:     Check2(strconv.Atoi(nextField())),
 			PPID:    Check2(strconv.Atoi(nextField())),
 			Command: strings.TrimSpace(line[i:]),
+		}
+		if Uptime > time.Minute {
+			p.CPU = float64(CPUTime) / float64(Uptime)
 		}
 		if p.PID > 1 {
 			processByPID[p.PID] = &p
@@ -54,6 +74,7 @@ func main() {
 		parent := p
 		for ; parent.PPID != 1; parent = processByPID[parent.PPID] {
 		}
+		parent.CPU += p.CPU
 		parent.RSS += p.RSS
 	}
 
@@ -95,26 +116,13 @@ func main() {
 			processByName[name] = &p
 		} else {
 			// merge
+			p2.CPU += p.CPU
 			p2.RSS += p.RSS
 		}
 	}
-
-	var totalMem int
 	for _, p := range processByName {
 		p.RSS *= 1024
-		totalMem += p.RSS
+		p.CPU = p.CPU * 5 / 3
 	}
-
-	// Display results
-	names := maps.Keys(processByName)
-	slices.SortFunc(names, func(a, b string) bool {
-		return processByName[a].RSS > processByName[b].RSS
-	})
-	tot := fmt.Sprintf("%.f", float64(totalMem)/1e6)
-	fmt.Println(tot, "MB Total memory used")
-	fmt.Println()
-	for _, cmd := range names {
-		percent := fmt.Sprintf("%.f", 100*float64(processByName[cmd].RSS)/float64(totalMem))
-		fmt.Printf("%*.f MB %3s %% %s \n", len(tot), float64(processByName[cmd].RSS)/1e6, percent, cmd)
-	}
+	return processByName
 }
