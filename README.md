@@ -12,10 +12,20 @@ An applet showing CPU and memory usage.
 
 ### Installation
 
+#### Binary
+
+[https://github.com/xpetit/macos/releases/latest](https://github.com/xpetit/macos/releases/latest)
+
+#### From source
+
 ```
 git clone https://github.com/xpetit/macos.git
 cd macos
 go build -o busy/Busy.app/Contents/MacOS/busy ./busy
 ```
 
-Open Preferences, Users & Groups, Login items, Add "Busy.app" from the folder `macos/busy`.
+The application "Busy.app" is in the folder `macos/busy`.
+
+#### Run automatically at startup
+
+Open Preferences, Users & Groups, Login items, Add "Busy.app".
