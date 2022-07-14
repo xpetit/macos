@@ -32,13 +32,18 @@ func menuList(nb int) []*systray.MenuItem {
 func main() {
 	systray.Run(func() {
 		go func() {
-			vm := Check2(mem.VirtualMemory())
-			systray.SetTitle(fmt.Sprintf("??%% %.fG", math.Ceil(float64(vm.Used)/1e9)))
+			gigUsed := func() int {
+				vm := Check2(mem.VirtualMemory())
+				f := float64(vm.Used + vm.Wired)
+				f /= 1e9         // B to GiB
+				f /= 1.073741824 // GiB to GB
+				return int(math.Ceil(f))
+			}
+			systray.SetTitle(fmt.Sprintf("??%% %dG", gigUsed()))
 			for {
 				t := time.Now()
 				percent := Check2(cpu.Percent(refreshDelay-time.Second, false))
-				vm := Check2(mem.VirtualMemory())
-				systray.SetTitle(fmt.Sprintf("%.f%% %.fG", percent[0]*float64(runtime.NumCPU()), math.Ceil(float64(vm.Used)/1e9)))
+				systray.SetTitle(fmt.Sprintf("%.f%% %dG", percent[0]*float64(runtime.NumCPU()), gigUsed()))
 				time.Sleep(time.Since(t.Add(refreshDelay)))
 			}
 		}()

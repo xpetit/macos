@@ -18,14 +18,32 @@ type process struct {
 	PPID    int
 }
 
-func parseDuration(s, minuteSep string) (d time.Duration) {
+func parseTime(s string) (d time.Duration) {
+	hours, s, ok := strings.Cut(s, ":")
+	Assert("found hours", ok)
+	d += time.Duration(Check2(strconv.Atoi(hours))) * time.Hour
+	mins, s, ok := strings.Cut(s, ".")
+	Assert("found minutes", ok)
+	d += time.Duration(Check2(strconv.Atoi(mins))) * time.Minute
+	d += time.Duration(Check2(strconv.Atoi(s))) * time.Second
+	return
+}
+
+func parseElapsed(s string) (d time.Duration) {
+	var ok bool
+	if len(s) > 8 {
+		var days string
+		days, s, ok = strings.Cut(s, "-")
+		Assert("days hours", ok)
+		d += time.Duration(Check2(strconv.Atoi(days))) * 24 * time.Hour
+	}
 	if len(s) > 5 {
-		hours, s2, ok := strings.Cut(s, ":")
+		var hours string
+		hours, s, ok = strings.Cut(s, ":")
 		Assert("found hours", ok)
 		d += time.Duration(Check2(strconv.Atoi(hours))) * time.Hour
-		s = s2
 	}
-	mins, s, ok := strings.Cut(s, minuteSep)
+	mins, s, ok := strings.Cut(s, ":")
 	Assert("found minutes", ok)
 	d += time.Duration(Check2(strconv.Atoi(mins))) * time.Minute
 	d += time.Duration(Check2(strconv.Atoi(s))) * time.Second
@@ -48,10 +66,8 @@ func GetProcesses() map[string]*process {
 			}
 			return line[start:i]
 		}
-		var (
-			CPUTime = parseDuration(nextField(), "." /*minuteSep*/)
-			Uptime  = parseDuration(nextField(), ":" /*minuteSep*/)
-		)
+		CPUTime := parseTime(nextField())
+		Uptime := parseElapsed(nextField())
 		p := process{
 			RSS:     Check2(strconv.Atoi(nextField())),
 			PID:     Check2(strconv.Atoi(nextField())),

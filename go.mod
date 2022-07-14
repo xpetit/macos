@@ -6,7 +6,7 @@ require (
 	github.com/getlantern/systray v1.2.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/xpetit/x v1.1.0
-	golang.org/x/exp v0.0.0-20220706164943-b4a6d9510983
+	golang.org/x/exp v0.0.0-20220713135740-79cabaa25d75
 )
 
 require (
